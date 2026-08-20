@@ -1,0 +1,181 @@
+// https://nuxt.com/docs/api/configuration/nuxt-config
+import { createResolver } from '@nuxt/kit'
+
+const resolver = createResolver(import.meta.url)
+
+export default defineNuxtConfig({
+  // `$meta.name` makes Nuxt auto-generate a `#layers/feedlog` alias pointing
+  // at this layer's rootDir, whether this project runs standalone (`cd` in,
+  // `pnpm dev`) or is embedded as a consumer's layer (e.g. under
+  // `<your-app>/layers/feedlog/`). Official:
+  // https://nuxt.com/docs/4.x/guide/going-further/layers
+  //
+  // Required for the standalone case — in the consumer case Nuxt's
+  // auto-scan of `~~/layers/<dirname>/` would also generate the same alias
+  // from the directory name, but we keep `$meta.name` explicit so standalone
+  // runs don't break and the layer's identity isn't tied to a particular
+  // directory name.
+  $meta: { name: 'feedlog' },
+
+  compatibilityDate: '2025-07-15',
+  devtools: { enabled: true },
+
+  // NOTE: `#shared` is owned by the active Nuxt instance (the consumer), so
+  // a downstream app extending this layer can place its own `shared/types/*`
+  // and import via `#shared/`. This layer's own layer-local references go
+  // through `#layers/feedlog/...` (auto-generated from $meta.name above).
+
+  // app/stores/ is NOT in Nuxt's layer auto-merge list, so when feedlog is
+  // consumed as a layer, `useBoardStore` etc. would not auto-import. Force
+  // registration with an absolute path so Pinia stores work in both standalone
+  // and extended contexts.
+  imports: {
+    dirs: [resolver.resolve('./app/stores')],
+  },
+
+  app: {
+    head: {
+      // Keyed so a configured org logo can override every icon slot at runtime
+      // (app.vue). type/sizes are intentionally omitted: unhead merges keyed
+      // tags by union, so any hint here would leak onto the override and
+      // mislabel a logo of a different format. The browser sniffs the served
+      // content-type either way.
+      link: [
+        { key: 'favicon-svg', rel: 'icon', href: '/logo.svg' },
+        { key: 'favicon-png', rel: 'icon', href: '/favicon.png' },
+        { key: 'favicon-ico', rel: 'shortcut icon', href: '/favicon.ico' },
+        { key: 'favicon-apple', rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      ],
+    },
+  },
+
+  site: {
+    name: 'FeedLog',
+  },
+
+  components: [
+    { path: resolver.resolve('./app/components'), pathPrefix: false },
+  ],
+
+  modules: [
+    '@nuxt/eslint',
+    '@nuxt/fonts',
+    '@nuxt/icon',
+    '@nuxt/image',
+    '@nuxtjs/i18n',
+    '@nuxtjs/seo',
+    '@pinia/nuxt',
+    '@nuxtjs/tailwindcss',
+    'shadcn-nuxt',
+    '@nuxthub/core',
+    // CF-only bootstrap module: adds a /setup page + /api/_migrate endpoints
+    // so the one-click Cloudflare Deploy Button can finish DB migrations on
+    // first request. All handlers no-op (404) under non-CF presets.
+    // Resolver path keeps layer-consumer usage working.
+    resolver.resolve('./modules/cf-setup/module'),
+    // Node / Docker only: registers an S3-compatible blob provider at
+    // runtime when S3_* env vars are set. Skipped on cloudflare-module
+    // and vercel presets where NuxtHub's R2 / Vercel Blob driver applies.
+    resolver.resolve('./modules/blob-s3/module'),
+    resolver.resolve('./modules/widget-preload/module'),
+  ],
+  shadcn: {
+    prefix: '',
+    componentDir: resolver.resolve('./app/components/ui'),
+  },
+  fonts: {
+    families: [
+      {
+        name: 'Inter',
+        provider: 'google',
+        weights: [400, 500, 600, 700],
+      },
+    ],
+  },
+  i18n: {
+    strategy: 'prefix_except_default',
+    defaultLocale: 'en',
+    vueI18n: 'i18n.config.ts',
+    detectBrowserLanguage: {
+      useCookie: true,
+      cookieKey: 'feedlog_locale',
+      redirectOn: 'root',
+    },
+    locales: [
+      { code: 'en', language: 'en-US', name: 'English', file: 'en.json' },
+      { code: 'zh', language: 'zh-CN', name: '中文', file: 'zh.json' },
+    ],
+  },
+  hub: {
+    blob: true,
+  },
+
+  // The widget frame's identity rides in the URL fragment, which never reaches
+  // the server, so a server render can only produce an empty shell — one the
+  // visitor never sees, because the SDK keeps the frame hidden until it reports
+  // ready. Rendering it costs ~290ms of TTFB and a hydration pass on top.
+  //
+  // That shell is the same bytes for everyone opening the frame on a host, so
+  // it is worth caching — but briefly: a deploy rotates the asset hashes the
+  // shell points at, and a stale one asks for chunks the new image never built.
+  routeRules: {
+    '/widget/embed': {
+      ssr: false,
+      headers: { 'cache-control': 'public, max-age=300, stale-while-revalidate=600' },
+    },
+    '/*/widget/embed': {
+      ssr: false,
+      headers: { 'cache-control': 'public, max-age=300, stale-while-revalidate=600' },
+    },
+  },
+
+  icon: {
+    // Everything the widget frame draws. Bundled because the frame otherwise
+    // fetches two icon collections over HTTP while the visitor waits.
+    clientBundle: {
+      icons: [
+        'lucide:alert-circle',
+        'lucide:arrow-left',
+        'lucide:arrow-up-right',
+        'lucide:chevron-up',
+        'lucide:globe',
+        'lucide:image',
+        'lucide:inbox',
+        'lucide:loader-2',
+        'lucide:message-circle',
+        'lucide:x',
+      ],
+    },
+  },
+
+  build: {
+    transpile: ['reka-ui'],
+  },
+
+  nitro: {
+    // Keep CF Workers' native node:fs / path / process available at runtime so
+    // the cf-setup module can read bundled migration files via `/bundle/...`.
+    // Without this, Nitro's unenv stub shadows them, reads return empty, and
+    // the state classifier never leaves `bootstrap`.
+    unenv: {
+      external: ['node:fs', 'node:fs/promises', 'node:path', 'node:process'],
+    },
+  },
+
+  vite: {
+    ssr: {
+      // Exclude md-editor-v3 from SSR bundle — it's browser-only and very large (~2MB)
+      external: ['md-editor-v3'],
+    },
+  },
+
+  ogImage: {
+    enabled: false,
+  },
+
+  runtimeConfig: {
+    public: {
+      uploadPrefix: process.env.NUXT_PUBLIC_UPLOAD_PREFIX || 'uploads',
+    },
+  },
+})

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/linkcraftstudio/feedlog/discussions
+    about: Questions, ideas, and general conversation belong here.
+  - name: Security vulnerability
+    url: https://github.com/linkcraftstudio/feedlog/blob/main/SECURITY.md
+    about: Please report privately via email, not as a public issue.

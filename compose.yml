@@ -1,0 +1,61 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: feedlog
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d feedlog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ghcr.io/linkcraftstudio/feedlog:v0.1.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    volumes:
+      # NuxtHub local-fs blob driver writes to /app/.data/blob. Mount a
+      # named volume so uploads survive container restarts when no S3 is
+      # configured. Ignored once S3_* env vars are set.
+      - app-data:/app/.data
+    environment:
+      # required — see https://github.com/linkcraftstudio/feedlog#environment-variables
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/feedlog
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - SYSTEM_ADMIN_EMAILS=${SYSTEM_ADMIN_EMAILS}
+      # optional — pass through from .env when set, ignored when unset
+      - BETTER_AUTH_URL
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - GITHUB_CLIENT_ID
+      - GITHUB_CLIENT_SECRET
+      - AUTH_EMAIL_ENABLED
+      - AUTH_EMAIL_VERIFY
+      - OPENAI_API_KEY
+      - OPENAI_BASE_URL
+      - OPENAI_TEXT_MODEL
+      - EMAIL_PROVIDER
+      - RESEND_API_KEY
+      - EMAIL_FROM
+      # S3-compatible blob storage — set ALL three of S3_ACCESS_KEY_ID,
+      # S3_SECRET_ACCESS_KEY, S3_BUCKET plus AT LEAST ONE of S3_ENDPOINT
+      # (non-AWS) or S3_REGION (AWS). Service-specific cheat sheet:
+      # https://github.com/linkcraftstudio/feedlog/blob/main/docs/configuration.md#s3-compatible-storage
+      - S3_ACCESS_KEY_ID
+      - S3_SECRET_ACCESS_KEY
+      - S3_BUCKET
+      - S3_ENDPOINT
+      - S3_REGION
+
+volumes:
+  db-data:
+  app-data:

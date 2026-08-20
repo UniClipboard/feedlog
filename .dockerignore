@@ -1,0 +1,14 @@
+node_modules
+.nuxt
+.output
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.ali_ram
+.vercel
+.wrangler
+.data
+*.md
+docs

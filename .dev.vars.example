@@ -1,0 +1,10 @@
+# Secrets for the Cloudflare Deploy Button form — CF renders each key here as
+# a masked "secret" input and uploads the submitted value as an encrypted
+# Worker Secret (never written back to the forked repository).
+#
+# Anything past these two is optional and can be added post-deploy from the
+# Cloudflare dashboard (Workers & Pages → your Worker → Settings →
+# Variables and Secrets).
+
+BETTER_AUTH_SECRET=
+SYSTEM_ADMIN_EMAILS=

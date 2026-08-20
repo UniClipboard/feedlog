@@ -1,0 +1,57 @@
+name = "feedlog"
+compatibility_date = "2026-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Bundle the Drizzle migrations folder into the Worker as Text modules so
+# runtime-migrate can read `.sql` files and `meta/_journal.json` via
+# node:fs under /bundle/... at request time. Combined with nuxt.config.ts's
+# nitro.unenv.external for node:fs, this is what lets the /setup page run
+# migrations on the very first request after deploy.
+#
+# Newer Workers runtimes (compatibility_date >= 2026-01-20) ship with a
+# built-in `.sql` Text rule, but older wrangler CLIs fall back to an
+# earlier runtime that lacks it — declaring both globs explicitly keeps
+# the same behavior across wrangler versions.
+find_additional_modules = true
+
+[[rules]]
+type = "Text"
+globs = ["**/*.sql", "**/_journal.json"]
+fallthrough = true
+
+# Hyperdrive accelerates your external Postgres connection.
+# Create one with: wrangler hyperdrive create feedlog --connection-string="postgresql://..."
+# Replace the placeholder id below with the output. The one-click Deploy
+# Button walks the user through creating a Hyperdrive config and patches the
+# id in automatically.
+[[hyperdrive]]
+binding = "POSTGRES"
+id = "REPLACE_WITH_YOUR_HYPERDRIVE_ID"
+
+# R2 bucket for blob storage (file uploads).
+# Create one with: wrangler r2 bucket create feedlog
+[[r2_buckets]]
+binding = "BLOB"
+bucket_name = "feedlog"
+
+# Public (non-secret) configuration.
+# Secrets (BETTER_AUTH_SECRET, SYSTEM_ADMIN_EMAILS, GOOGLE_CLIENT_SECRET,
+# OPENAI_API_KEY, etc.) must be set via `wrangler secret put <NAME>` or via
+# the Deploy Button form (backed by .dev.vars.example), NOT declared here.
+[vars]
+BETTER_AUTH_URL = "https://your-worker.workers.dev"
+# GOOGLE_CLIENT_ID = "your-google-oauth-client-id.apps.googleusercontent.com"
+
+# Secrets to configure via `wrangler secret put` (manual-deploy path):
+#   wrangler secret put BETTER_AUTH_SECRET       # random 32+ char string
+#   wrangler secret put SYSTEM_ADMIN_EMAILS      # e.g. you@example.com
+#   wrangler secret put GOOGLE_CLIENT_SECRET     # if enabling Google OAuth
+#   wrangler secret put OPENAI_API_KEY           # if enabling AI features
+
+[observability]
+[observability.logs]
+enabled = false
+invocation_logs = true
+
+[placement]
+mode = "smart"
