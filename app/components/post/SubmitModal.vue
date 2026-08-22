@@ -19,8 +19,7 @@ const { boards } = storeToRefs(boardStore)
 const { data: session } = useAuthSession()
 const isLoggedIn = computed(() => !!session.value?.user)
 const loginModal = useLoginModal()
-// The user pressed submit while signed out; resume once a session appears.
-const awaitingLogin = ref(false)
+const { pending, consumePending } = usePendingAction()
 
 const selectedBoardId = ref<string | null>(null)
 const title = ref('')
@@ -91,7 +90,6 @@ function reset() {
   error.value = ''
   similarPosts.value = []
   showDetailSlug.value = null
-  awaitingLogin.value = false
 }
 
 async function handleSubmit() {
@@ -113,8 +111,12 @@ async function handleSubmit() {
   // is what earns the deferral — the auth prompt waits until it would cost the
   // reporter something to walk away.
   if (!isLoggedIn.value) {
-    awaitingLogin.value = true
-    loginModal.open()
+    loginModal.open({
+      type: 'submit-post',
+      boardId: selectedBoardId.value,
+      title: title.value,
+      content: content.value,
+    })
     return
   }
 
@@ -142,14 +144,18 @@ async function handleSubmit() {
   }
 }
 
-// Sign-in happens in place (OAuth runs in a popup, email posts via fetch), so
-// the draft is still in memory here — finish the submit the user already asked
-// for instead of making them press the button twice.
-watch(isLoggedIn, (v) => {
-  if (!v || !awaitingLogin.value) return
-  awaitingLogin.value = false
-  void handleSubmit()
-})
+watch([isLoggedIn, pending], async ([loggedIn, action]) => {
+  if (!loggedIn || action?.type !== 'submit-post') return
+  const restored = consumePending('submit-post')
+  if (!restored) return
+
+  open.value = true
+  await nextTick()
+  selectedBoardId.value = restored.boardId
+  title.value = restored.title
+  content.value = restored.content
+  await handleSubmit()
+}, { immediate: true })
 
 // Set default board when modal opens, reset when it closes
 watch(open, (v) => {
@@ -160,7 +166,7 @@ watch(open, (v) => {
   } else {
     reset()
   }
-})
+}, { immediate: true })
 
 </script>
 
@@ -263,4 +269,3 @@ watch(open, (v) => {
     @update:open="showDetailSlug = null"
   />
 </template>
-

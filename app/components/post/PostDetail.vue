@@ -46,6 +46,7 @@ const commentSort = ref<'newest' | 'oldest' | 'top'>('newest')
 const { data: session } = useAuthSession()
 const isLoggedIn = computed(() => !!session.value?.user)
 const loginModal = useLoginModal()
+const { pending, consumePending } = usePendingAction()
 
 // Permissions
 const postAuthorId = computed(() => post.value?.author?.id)
@@ -208,16 +209,36 @@ async function handleSimilarMerge(direction: 'bring' | 'push', targetPost: any) 
 }
 
 // ---- Vote handler ----
+function syncPostVote() {
+  const current = post.value
+  if (!current) return
+  emit('updated', {
+    id: current.id,
+    slug: current.slug,
+    voteCount: current.voteCount,
+    hasVoted: current.hasVoted,
+  })
+}
+
 function handleVote() {
   if (!post.value) return
   if (isMerged.value) return // Block voting on merged posts
-  if (!isLoggedIn.value) return loginModal.open()
+  if (!isLoggedIn.value) {
+    return loginModal.open({ type: 'vote-post', postId: post.value.id })
+  }
   const p = post.value
   const settled = p.hasVoted ? store.unvote(props.slug) : store.vote(props.slug)
-  const syncList = () => emit('updated', { id: p.id, slug: p.slug, voteCount: p.voteCount, hasVoted: p.hasVoted })
-  syncList()
-  settled.then(syncList)
+  syncPostVote()
+  settled.then(syncPostVote)
 }
+
+watch([isLoggedIn, pending, post], async ([loggedIn, action, currentPost]) => {
+  if (!loggedIn || action?.type !== 'vote-post' || action.postId !== currentPost?.id) return
+  const restored = consumePending('vote-post')
+  if (!restored) return
+  await store.vote(props.slug)
+  syncPostVote()
+}, { immediate: true })
 
 // ---- Comment interaction state ----
 const replyingTo = ref<{ commentId: string; parentId: string } | null>(null)

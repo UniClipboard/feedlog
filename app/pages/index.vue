@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { toast } from 'vue-sonner'
+
 usePageOg({ kind: 'home' })
 const portalOrg = usePortalOrg() // for the sr-only <h1> below
 const branding = computed(() => portalOrg.value.branding)
@@ -13,6 +15,8 @@ const isSsoSession = computed(
 const orgCtx = useOrgContext()
 const canEditPortal = computed(() => !!session.value?.user && !!orgCtx.value.role && !isSsoSession.value)
 const loginModal = useLoginModal()
+const { pending, consumePending } = usePendingAction()
+const { t } = useI18n()
 const timeAgo = useTimeAgo()
 
 // Board store
@@ -162,6 +166,50 @@ const postDetailStore = usePostDetailStore()
 const showDetail = ref(false)
 const showSubmit = ref(false)
 const detailSlug = ref<string | null>(null)
+const resumedSubmitBoardId = shallowRef<string | null>(null)
+
+function requestNewPost() {
+  if (isLoggedIn.value) {
+    showSubmit.value = true
+    return
+  }
+  loginModal.open({ type: 'open-submit', boardId: activeBoardId.value })
+}
+
+watch([isLoggedIn, pending], async ([loggedIn, action]) => {
+  if (!loggedIn || !action) return
+
+  if (action.type === 'open-submit') {
+    const restored = consumePending('open-submit')
+    if (!restored) return
+    resumedSubmitBoardId.value = restored.boardId
+    showSubmit.value = true
+    return
+  }
+
+  if (action.type !== 'vote-post') return
+  const restored = consumePending('vote-post')
+  if (!restored) return
+  try {
+    const result = await useApiFetch<{ voted: boolean, voteCount: number }>(
+      `/api/posts/${restored.postId}/vote`,
+      { method: 'POST' },
+    )
+    const target = posts.value.find(post => post.id === restored.postId)
+    if (target) {
+      target.hasVoted = result.voted
+      target.voteCount = result.voteCount
+    } else {
+      await refreshPosts()
+    }
+  } catch {
+    toast.error(t('auth.errors.resumeActionFailed'))
+  }
+}, { immediate: true })
+
+watch(showSubmit, (isOpen) => {
+  if (!isOpen) resumedSubmitBoardId.value = null
+})
 
 // Pre-filled submit links: /?new=1&title=...&body=...&b=...
 // This is the one entry point that opens the form to signed-out visitors — they
@@ -228,7 +276,9 @@ function onPostDeleted(postId: string) {
 
 // Vote / unvote on list items
 async function handleVote(post: PostListItem) {
-  if (!isLoggedIn.value) return loginModal.open()
+  if (!isLoggedIn.value) {
+    return loginModal.open({ type: 'vote-post', postId: post.id })
+  }
   const wasVoted = post.hasVoted
   post.hasVoted = !wasVoted
   post.voteCount += wasVoted ? -1 : 1
@@ -360,7 +410,7 @@ async function handleVote(post: PostListItem) {
       ref="searchToolbar"
       v-model="searchQuery"
       v-model:sort="sortBy"
-      @new-request="isLoggedIn ? (showSubmit = true) : loginModal.open()"
+      @new-request="requestNewPost"
     />
 
     <!-- Post list with loading state -->
@@ -375,7 +425,7 @@ async function handleVote(post: PostListItem) {
         <p class="fl-empty__hint">{{ $t('board.noMatchesHint') }}</p>
         <Button
           class="h-10 px-4 rounded-lg text-[15px] font-heading font-semibold"
-          @click="isLoggedIn ? showSubmit = true : loginModal.open()"
+          @click="requestNewPost"
         >
           <Icon name="lucide:plus" size="18" />
           {{ $t('board.newRequest') }}
@@ -483,7 +533,7 @@ async function handleVote(post: PostListItem) {
   <!-- Submit feedback modal -->
   <SubmitModal
     v-model:open="showSubmit"
-    :default-board-id="activeBoardId ?? undefined"
+    :default-board-id="resumedSubmitBoardId ?? activeBoardId ?? undefined"
     :prefill="submitPrefill"
     @created="refreshPosts()"
   />

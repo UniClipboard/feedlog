@@ -36,11 +36,12 @@ if (!hasOAuth && !emailLoginEnabled) {
   )
 }
 
-const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {}
+const socialProviders: NonNullable<BetterAuthOptions['socialProviders']> = {}
 if (hasGoogle) {
   socialProviders.google = {
     clientId: env.GOOGLE_CLIENT_ID!,
     clientSecret: env.GOOGLE_CLIENT_SECRET!,
+    prompt: 'select_account',
   }
 }
 if (hasGithub) {

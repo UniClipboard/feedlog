@@ -2,6 +2,7 @@
 import { toast } from 'vue-sonner'
 
 const { signIn, signUp, requestPasswordReset } = useAuth()
+const { start: startSocialSignIn, pendingProvider } = useSocialSignIn()
 const { t } = useI18n()
 
 const open = defineModel<boolean>('open', { default: false })
@@ -9,7 +10,8 @@ const open = defineModel<boolean>('open', { default: false })
 type ModalState = 'sign-in' | 'sign-in-email' | 'sign-up-email' | 'verify-email' | 'forgot-password' | 'reset-sent'
 const state = ref<ModalState>('sign-in')
 
-const loading = ref(false)
+const formLoading = shallowRef(false)
+const loading = computed(() => formLoading.value || pendingProvider.value !== null)
 
 interface AuthMethods {
   google: boolean
@@ -67,83 +69,20 @@ function switchTo(target: ModalState) {
   state.value = target
 }
 
-// --- Social OAuth (shared popup logic) ---
-//
-// callbackURL is where better-auth 302s after the OAuth flow finishes
-// (the redirect_uri registered with Google/GitHub).
-//
-//   - Default (authDomain unset or same-origin as the current page):
-//     callbackURL='/auth/callback' — same-origin popup that postMessages
-//     the opener and closes.
-//
-//   - Cross-domain (authDomain on a different host): callbackURL is
-//     `{authDomain}/api/auth/post-login?return=...`, an endpoint that
-//     mints a one-time-token and bounces back to the current host's
-//     /api/auth/handoff. The handoff endpoint sets the session cookie and
-//     lands the popup on /auth/callback, which then postMessages the
-//     opener as before.
-function buildCallbackURL(): string {
-  const authDomain = (useRuntimeConfig().public.authDomain || '') as string
-  if (!authDomain || typeof window === 'undefined') return '/auth/callback'
-  let crossOrigin = false
-  try {
-    crossOrigin = new URL(authDomain).origin !== window.location.origin
-  } catch {
-    return '/auth/callback'
-  }
-  if (!crossOrigin) return '/auth/callback'
-  const returnTo = `${window.location.origin}/auth/callback`
-  return `${authDomain}/api/auth/post-login?return=${encodeURIComponent(returnTo)}`
-}
-
 async function loginWithSocial(provider: 'google' | 'github') {
-  loading.value = true
-
-  const res = await $fetch<{ url: string }>('/api/auth/sign-in/social', {
-    method: 'POST',
-    body: { provider, callbackURL: buildCallbackURL() },
-  })
-
-  const width = 500
-  const height = 600
-  const left = window.screenX + (window.outerWidth - width) / 2
-  const top = window.screenY + (window.outerHeight - height) / 2
-
-  const oauthUrl = new URL(res.url)
-  if (provider === 'google') {
-    oauthUrl.searchParams.set('prompt', 'select_account')
+  try {
+    const error = await startSocialSignIn(provider)
+    if (error?.code === 'RESUME_UNAVAILABLE') toast.error(t('auth.errors.resumeUnavailable'))
+    else if (error) toast.error(error.message || t('auth.errors.signInFailed'))
+  } catch {
+    toast.error(t('auth.errors.signInFailed'))
   }
-
-  const popup = window.open(
-    oauthUrl.toString(),
-    `${provider}-login`,
-    `width=${width},height=${height},left=${left},top=${top},popup=yes`,
-  )
-
-  const timer = setInterval(() => {
-    if (popup?.closed) {
-      clearInterval(timer)
-      loading.value = false
-    }
-  }, 500)
-
-  function onMessage(event: MessageEvent) {
-    if (event.data?.type === 'auth-callback') {
-      clearInterval(timer)
-      window.removeEventListener('message', onMessage)
-      loading.value = false
-      open.value = false
-      refreshNuxtData('auth-session')
-    }
-  }
-
-  window.addEventListener('message', onMessage)
 }
 
 // --- Email Sign In ---
 async function handleSignIn() {
   if (!form.email || !form.password) return
-  loading.value = true
+  formLoading.value = true
   try {
     const { error } = await signIn.email({
       email: form.email,
@@ -162,7 +101,7 @@ async function handleSignIn() {
     open.value = false
     refreshNuxtData('auth-session')
   } finally {
-    loading.value = false
+    formLoading.value = false
   }
 }
 
@@ -173,7 +112,7 @@ async function handleSignUp() {
     toast.error(t('auth.errors.passwordTooShort'))
     return
   }
-  loading.value = true
+  formLoading.value = true
   try {
     const { error } = await signUp.email({
       name: form.name,
@@ -191,7 +130,7 @@ async function handleSignUp() {
       refreshNuxtData('auth-session')
     }
   } finally {
-    loading.value = false
+    formLoading.value = false
   }
 }
 
@@ -241,7 +180,7 @@ onUnmounted(() => {
 
 // "I've verified" button — try to sign in with the form credentials
 async function handleVerified() {
-  loading.value = true
+  formLoading.value = true
   try {
     const { error } = await signIn.email({
       email: form.email,
@@ -259,7 +198,7 @@ async function handleVerified() {
     open.value = false
     refreshNuxtData('auth-session')
   } finally {
-    loading.value = false
+    formLoading.value = false
   }
 }
 
@@ -294,7 +233,7 @@ async function handleForgotPassword() {
     toast.error(t('auth.errors.enterEmail'))
     return
   }
-  loading.value = true
+  formLoading.value = true
   try {
     await requestPasswordReset({
       email: form.email,
@@ -304,7 +243,7 @@ async function handleForgotPassword() {
   } catch {
     toast.error(t('auth.errors.sendResetFailed'))
   } finally {
-    loading.value = false
+    formLoading.value = false
   }
 }
 
